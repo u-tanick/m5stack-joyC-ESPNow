@@ -42,6 +42,7 @@ void setup() {
   canvas.setTextFont(&fonts::lgfxJapanGothic_12);
 
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
@@ -92,8 +93,15 @@ void sendESPNowData() {
     if (selectedPeerIndex == i) {
       esp_err_t result =
           esp_now_send(peers[i].mac, sendDataLR, sizeof(sendDataLR));
-      Serial.printf("Sent to %s (%d): %s\n", peers[i].name, i,
-                    result == ESP_OK ? "OK" : "FAILED");
+      static uint32_t last_log = 0;
+      if (millis() - last_log >= 500) {
+        last_log = millis();
+        Serial.printf("Sent to %s (%d): %s | FB=%d, Turn=%d, Mode=%d | "
+                      "raw(L_Y=%d, R_X=%d)\n",
+                      peers[i].name, i, result == ESP_OK ? "OK" : "FAILED",
+                      sendDataLR[0], sendDataLR[1], sendDataLR[2], joyc.GetY(0),
+                      joyc.GetX(1));
+      }
     }
   }
 }
@@ -146,12 +154,15 @@ void loop() {
     canvas.drawCentreString("BtnA/Press: OK", 67, 221, 2);
     M5.Power.setLed(0);
 
-    if (joyc.GetY(0) > 200) {
+    uint8_t ly = joyc.GetY(0);
+    if (ly < 60) {
+      // スティック下: 次の選択肢へ進む
       selectedPeerIndex = (selectedPeerIndex + 1) % numPeers;
-      delay(300);
-    } else if (joyc.GetY(0) < 50) {
+      delay(250);
+    } else if (ly > 140) {
+      // スティック上: 前の選択肢へ戻る
       selectedPeerIndex = (selectedPeerIndex - 1 + numPeers) % numPeers;
-      delay(300);
+      delay(250);
     }
     if (M5.BtnA.wasPressed() || joyc.GetPress(0)) {
       isSelectMode = false;
@@ -247,5 +258,5 @@ void loop() {
   // ダブルバッファ転送でちらつきを完全防止
   canvas.pushSprite(0, 0);
 
-  delay(50);
+  delay(20);
 }
