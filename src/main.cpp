@@ -41,6 +41,18 @@ void setup() {
   canvas.createSprite(135, 240);
   canvas.setTextFont(&fonts::lgfxJapanGothic_12);
 
+  joyc.Init();
+  Serial.printf("Detected Hat: %s\n", joyc.GetHatName());
+
+  // 起動時の初期化画面表示
+  canvas.fillScreen(TFT_BLACK);
+  canvas.setTextColor(TFT_WHITE);
+  canvas.drawCentreString("CONTROLLER INIT", 67, 70, 2);
+  canvas.setTextColor(joyc.GetHatType() != HAT_NONE ? TFT_GREEN : TFT_RED);
+  canvas.drawCentreString(joyc.GetHatName(), 67, 105, 2);
+  canvas.pushSprite(0, 0);
+  delay(500);
+
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   if (esp_now_init() != ESP_OK) {
@@ -64,28 +76,84 @@ void setup() {
 }
 
 void drawJoystickInfo() {
-  canvas.drawFastVLine(67, 52, 95, TFT_DARKGRAY);
+  if (joyc.GetHatType() == HAT_MINI_JOYC) {
+    // MiniJoyC (1スティック) 専用UI
+    canvas.setTextColor(TFT_CYAN);
+    canvas.drawCentreString("- Mini JoyC -", 67, 50, 2);
 
-  canvas.setTextColor(TFT_WHITE);
-  canvas.drawCentreString("^", 33, 55, 4);
-  canvas.drawCentreString("L", 33, 72, 4);
-  canvas.drawCentreString("v", 33, 90, 4);
-  canvas.drawCentreString("< R >", 101, 72, 4);
+    uint8_t stick_x = joyc.GetX(0); // 0..200 (center 100)
+    uint8_t stick_y = joyc.GetY(0); // 0..200 (center 100)
+    bool pressed = (joyc.GetPress(0) != 0);
 
-  if (joyc.GetY(0) > 155 || joyc.GetY(0) < 55)
-    canvas.setTextColor(TFT_ORANGE);
-  else
+    // ジョイスティックレーダー（円＋十字線＋ドット）
+    const int cx = 67;
+    const int cy = 96;
+    const int r = 26;
+    canvas.drawCircle(cx, cy, r, TFT_DARKGRAY);
+    canvas.drawFastHLine(cx - r + 4, cy, (r - 4) * 2, TFT_DARKGRAY);
+    canvas.drawFastVLine(cx, cy - r + 4, (r - 4) * 2, TFT_DARKGRAY);
+
+    // ドット描画 (画面上: 右倒し=+X, 前倒し=-Y)
+    int dx = (int)(100 - stick_x) * (r - 6) / 100;
+    int dy = -(int)(stick_y - 100) * (r - 6) / 100;
+    if (dx < -(r - 6)) dx = -(r - 6);
+    if (dx > (r - 6)) dx = (r - 6);
+    if (dy < -(r - 6)) dy = -(r - 6);
+    if (dy > (r - 6)) dy = (r - 6);
+
+    bool isMoving = (stick_y > 155 || stick_y < 55 || stick_x > 155 || stick_x < 55);
+    uint16_t dotColor = pressed ? TFT_YELLOW : (isMoving ? TFT_ORANGE : TFT_GREEN);
+    canvas.fillCircle(cx + dx, cy + dy, 5, dotColor);
+    canvas.drawCircle(cx + dx, cy + dy, 5, TFT_WHITE);
+
+    // 数値表示
+    if (stick_x > 155 || stick_x < 55) canvas.setTextColor(TFT_ORANGE);
+    else canvas.setTextColor(TFT_WHITE);
+    sprintf(text_buff, "X:%3d", stick_x);
+    canvas.drawString(text_buff, 18, 130, 2);
+
+    if (stick_y > 155 || stick_y < 55) canvas.setTextColor(TFT_ORANGE);
+    else canvas.setTextColor(TFT_WHITE);
+    sprintf(text_buff, "Y:%3d", stick_y);
+    canvas.drawString(text_buff, 76, 130, 2);
+
     canvas.setTextColor(TFT_WHITE);
-  sprintf(text_buff, "%d", joyc.GetY(0));
-  canvas.drawCentreString(text_buff, 33, 125, 4);
+    if (pressed) {
+      canvas.setTextColor(TFT_YELLOW);
+      canvas.drawCentreString("[PUSH]", 67, 72, 2);
+      canvas.setTextColor(TFT_WHITE);
+    }
+  } else if (joyc.GetHatType() == HAT_JOYC) {
+    // JoyC Hat (2スティック) 従来UI
+    canvas.drawFastVLine(67, 52, 95, TFT_DARKGRAY);
 
-  if (joyc.GetX(1) > 155 || joyc.GetX(1) < 55)
-    canvas.setTextColor(TFT_ORANGE);
-  else
     canvas.setTextColor(TFT_WHITE);
-  sprintf(text_buff, "%d", joyc.GetX(1));
-  canvas.drawCentreString(text_buff, 101, 125, 4);
-  canvas.setTextColor(TFT_WHITE);
+    canvas.drawCentreString("^", 33, 55, 4);
+    canvas.drawCentreString("L", 33, 72, 4);
+    canvas.drawCentreString("v", 33, 90, 4);
+    canvas.drawCentreString("< R >", 101, 72, 4);
+
+    if (joyc.GetY(0) > 155 || joyc.GetY(0) < 55)
+      canvas.setTextColor(TFT_ORANGE);
+    else
+      canvas.setTextColor(TFT_WHITE);
+    sprintf(text_buff, "%d", joyc.GetY(0));
+    canvas.drawCentreString(text_buff, 33, 125, 4);
+
+    if (joyc.GetX(1) > 155 || joyc.GetX(1) < 55)
+      canvas.setTextColor(TFT_ORANGE);
+    else
+      canvas.setTextColor(TFT_WHITE);
+    sprintf(text_buff, "%d", joyc.GetX(1));
+    canvas.drawCentreString(text_buff, 101, 125, 4);
+    canvas.setTextColor(TFT_WHITE);
+  } else {
+    // Hat 未検出時
+    canvas.setTextColor(TFT_RED);
+    canvas.drawCentreString("NO HAT DETECTED", 67, 85, 2);
+    canvas.setTextColor(TFT_LIGHTGRAY);
+    canvas.drawCentreString("Checking I2C...", 67, 110, 2);
+  }
 }
 
 void sendESPNowData() {
@@ -108,6 +176,21 @@ void sendESPNowData() {
 
 void loop() {
   M5.update();
+
+  // 定期的なHat接続チェック（未接続の場合）
+  static uint32_t s_last_hat_check = 0;
+  if (millis() - s_last_hat_check >= 1000) {
+    s_last_hat_check = millis();
+    if (joyc.GetHatType() == HAT_NONE) {
+      joyc.CheckHat();
+    }
+  }
+
+  // スティック押し込みのエッジ検出 (wasPressed)
+  static bool s_last_stick_press = false;
+  bool current_stick_press = (joyc.GetPress(0) != 0);
+  bool stick_pressed_edge = (current_stick_press && !s_last_stick_press);
+  s_last_stick_press = current_stick_press;
 
   canvas.fillScreen(TFT_BLACK);
 
@@ -137,10 +220,13 @@ void loop() {
       sendDataLR[2] = 0;
       sendESPNowData();
       M5.Power.setLed(0);
+      joyc.SetLedColor(0x000030); // 選択モード: 青
     }
   }
 
   if (isSelectMode) {
+    joyc.SetLedColor(0x000030); // 選択モード: 青
+
     // 選択モード中のステータスバッジ
     canvas.fillRoundRect(8, 160, 119, 36, 6, TFT_BLUE);
     canvas.drawRoundRect(8, 160, 119, 36, 6, TFT_CYAN);
@@ -164,15 +250,18 @@ void loop() {
       selectedPeerIndex = (selectedPeerIndex - 1 + numPeers) % numPeers;
       delay(250);
     }
-    if (M5.BtnA.wasPressed() || joyc.GetPress(0)) {
+    if (M5.BtnA.wasPressed() || stick_pressed_edge) {
       isSelectMode = false;
     }
   } else {
-    if (M5.BtnA.wasPressed()) {
+    // スティック押し込みでも START / STOP をトグル可能
+    if (M5.BtnA.wasPressed() || stick_pressed_edge) {
       SEND_ESPNOW = (SEND_ESPNOW + 1) % 2;
     }
 
     if (SEND_ESPNOW == 1) {
+      joyc.SetLedColor(0x003000); // 送信中: 緑
+
       // 送信中ステータスバッジ（緑色背景＋黒文字で視認性向上）
       canvas.fillRoundRect(8, 158, 119, 38, 6, TFT_GREEN);
       canvas.drawRoundRect(8, 158, 119, 38, 6, TFT_WHITE);
@@ -214,11 +303,11 @@ void loop() {
         sendDataLR[1] = (joyc.GetX(1) > 155) ? 1 : (joyc.GetX(1) < 55) ? 2 : 0;
       } else if (strncmp(targetName, "Tank", 4) == 0 ||
                  strcmp(targetName, "Broad") == 0) {
-        // "Tank1" / "Tank2" / "Broad" operation specification:
+        // "Tank1" / "Tank2" / "Tank3" / "Broad" operation specification:
         // Right stick turn takes priority over Left stick operation
         bool rStickActive = (joyc.GetX(1) > 155 || joyc.GetX(1) < 55);
         if (rStickActive) {
-          // JoyC右スティック: 右倒し(<55)で1(右旋回)、左倒し(>155)で2(左旋回)
+          // 右倒し(<55)で1(右旋回)、左倒し(>155)で2(左旋回)
           sendDataLR[1] = (joyc.GetX(1) > 155) ? 2 : 1;
           sendDataLR[0] = 0; // Overridden by Right stick (takes priority)
         } else {
@@ -235,6 +324,8 @@ void loop() {
       }
       sendESPNowData();
     } else {
+      joyc.SetLedColor(0x300000); // 停止中: 赤
+
       // 停止中ステータスバッジ（赤色背景＋白文字で視認性向上）
       canvas.fillRoundRect(8, 158, 119, 38, 6, TFT_RED);
       canvas.drawRoundRect(8, 158, 119, 38, 6, TFT_WHITE);
@@ -260,3 +351,4 @@ void loop() {
 
   delay(20);
 }
+
