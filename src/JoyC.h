@@ -58,6 +58,7 @@ class JoyC {
    private:
     HatType _hat_type = HAT_NONE;
     uint32_t _last_check = 0;
+    uint32_t _current_led_color = 0xFFFFFFFF;
 
     void WriteBytes(uint8_t address, uint8_t Register_address, uint8_t* data,
                     size_t size);

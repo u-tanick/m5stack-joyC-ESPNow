@@ -20,11 +20,11 @@ PeerInfo peers[] = {
 };
 
 const int numPeers = sizeof(peers) / sizeof(peers[0]);
-int selectedPeerIndex = 0;
+int selectedPeerIndex = 2; // デフォルト: Tank3:Green (AtomS3 Lite)
 
 bool CONNECT_ESPNOW = false;
 uint8_t SEND_ESPNOW = 0;
-bool isSelectMode = true; // true: 送信先選択モード, false: 送信モード
+bool isSelectMode = false; // 起動時は操作モード(TX OFF)で待機。BtnBで選択モードへ
 
 uint8_t sendDataLR[3] = {0, 0, 0};
 
@@ -35,7 +35,7 @@ char text_buff[100];
 void setup() {
   auto cfg = M5.config();
   M5.begin(cfg);
-  Wire.begin(0, 26, 400000UL);
+  Wire.begin(0, 26, 100000UL); // Hatマイコンと安全に通信するため標準100kHz
 
   M5.Display.setBrightness(96);
   canvas.createSprite(135, 240);
@@ -164,11 +164,11 @@ void sendESPNowData() {
       static uint32_t last_log = 0;
       if (millis() - last_log >= 500) {
         last_log = millis();
-        Serial.printf("Sent to %s (%d): %s | FB=%d, Turn=%d, Mode=%d | "
-                      "raw(L_Y=%d, R_X=%d)\n",
+        Serial.printf("[TX] Target:%s (%d) | Result:%s | FB=%d, Turn=%d, Mode=%d | "
+                      "L_Y=%d, R_X=%d\n",
                       peers[i].name, i, result == ESP_OK ? "OK" : "FAILED",
                       sendDataLR[0], sendDataLR[1], sendDataLR[2], joyc.GetY(0),
-                      joyc.GetX(1));
+                      (joyc.GetHatType() == HAT_MINI_JOYC) ? joyc.GetX(0) : joyc.GetX(1));
       }
     }
   }
@@ -185,12 +185,6 @@ void loop() {
       joyc.CheckHat();
     }
   }
-
-  // スティック押し込みのエッジ検出 (wasPressed)
-  static bool s_last_stick_press = false;
-  bool current_stick_press = (joyc.GetPress(0) != 0);
-  bool stick_pressed_edge = (current_stick_press && !s_last_stick_press);
-  s_last_stick_press = current_stick_press;
 
   canvas.fillScreen(TFT_BLACK);
 
@@ -237,7 +231,7 @@ void loop() {
     canvas.drawFastHLine(15, 201, 105, TFT_DARKGRAY);
     canvas.setTextColor(TFT_LIGHTGRAY, TFT_BLACK);
     canvas.drawCentreString("Stick-Y: Move", 67, 205, 2);
-    canvas.drawCentreString("BtnA/Press: OK", 67, 221, 2);
+    canvas.drawCentreString("BtnA: OK", 67, 221, 2);
     M5.Power.setLed(0);
 
     uint8_t ly = joyc.GetY(0);
@@ -250,12 +244,19 @@ void loop() {
       selectedPeerIndex = (selectedPeerIndex - 1 + numPeers) % numPeers;
       delay(250);
     }
-    if (M5.BtnA.wasPressed() || stick_pressed_edge) {
+    if (M5.BtnA.wasPressed()) {
       isSelectMode = false;
     }
+
+    static uint32_t s_last_sel_log = 0;
+    if (millis() - s_last_sel_log >= 1000) {
+      s_last_sel_log = millis();
+      Serial.printf("[SELECT] Target: %s (%d) | Stick Y: %d\n",
+                    peers[selectedPeerIndex].name, selectedPeerIndex, ly);
+    }
   } else {
-    // スティック押し込みでも START / STOP をトグル可能
-    if (M5.BtnA.wasPressed() || stick_pressed_edge) {
+    // 操作モード: BtnA のみで START / STOP をトグル
+    if (M5.BtnA.wasPressed()) {
       SEND_ESPNOW = (SEND_ESPNOW + 1) % 2;
     }
 
@@ -275,17 +276,13 @@ void loop() {
       canvas.drawCentreString("BtnB: SELECT", 67, 221, 2);
       M5.Power.setLed(1);
 
-      sendDataLR[2] = 1; // 操作モード
+      sendDataLR[2] = 1; // 操作モード (TX ON)
 
       const char *targetName = peers[selectedPeerIndex].name;
 
       if (strcmp(targetName, "Kani") == 0) {
-        // "Kani" (Crab) operation specification:
-        // Right stick: tilt left/right to walk left/right
-        sendDataLR[0] = (joyc.GetX(1) > 155) ? 1 : (joyc.GetX(1) < 55) ? 2 : 0;
-
-        // Left stick: tilt up/down while operating the right stick to perform
-        // turn/spin motion
+        uint8_t rx = (joyc.GetHatType() == HAT_MINI_JOYC) ? joyc.GetX(0) : joyc.GetX(1);
+        sendDataLR[0] = (rx > 155) ? 1 : (rx < 55) ? 2 : 0;
         if (sendDataLR[0] != 0) {
           sendDataLR[1] = (joyc.GetY(0) > 155)  ? 1
                           : (joyc.GetY(0) < 55) ? 2
@@ -294,33 +291,31 @@ void loop() {
           sendDataLR[1] = 0;
         }
       } else if (strcmp(targetName, "Tako") == 0) {
-        // "Tako" (Octopus) operation specification:
-        // Left stick: tilt up/down to move face up/down
+        uint8_t rx = (joyc.GetHatType() == HAT_MINI_JOYC) ? joyc.GetX(0) : joyc.GetX(1);
         sendDataLR[0] = (joyc.GetY(0) > 155) ? 1 : (joyc.GetY(0) < 55) ? 2 : 0;
-
-        // Right stick: tilt left/right to rotate leg servo (always active,
-        // independent)
-        sendDataLR[1] = (joyc.GetX(1) > 155) ? 1 : (joyc.GetX(1) < 55) ? 2 : 0;
+        sendDataLR[1] = (rx > 155) ? 1 : (rx < 55) ? 2 : 0;
       } else if (strncmp(targetName, "Tank", 4) == 0 ||
                  strcmp(targetName, "Broad") == 0) {
-        // "Tank1" / "Tank2" / "Tank3" / "Broad" operation specification:
-        // Right stick turn takes priority over Left stick operation
-        bool rStickActive = (joyc.GetX(1) > 155 || joyc.GetX(1) < 55);
+        // "Tank1" / "Tank2" / "Tank3" / "Broad"
+        uint8_t ly = joyc.GetY(0);
+        uint8_t rx = (joyc.GetHatType() == HAT_MINI_JOYC) ? joyc.GetX(0) : joyc.GetX(1);
+
+        bool rStickActive = (rx > 155 || rx < 55);
         if (rStickActive) {
           // 右倒し(<55)で1(右旋回)、左倒し(>155)で2(左旋回)
-          sendDataLR[1] = (joyc.GetX(1) > 155) ? 2 : 1;
-          sendDataLR[0] = 0; // Overridden by Right stick (takes priority)
+          sendDataLR[1] = (rx > 155) ? 2 : 1;
+          sendDataLR[0] = 0; // 旋回優先
         } else {
           sendDataLR[1] = 0;
-          sendDataLR[0] = (joyc.GetY(0) > 155)  ? 1
-                          : (joyc.GetY(0) < 55) ? 2
-                                                : 0;
+          sendDataLR[0] = (ly > 155)  ? 1
+                          : (ly < 55) ? 2
+                                      : 0;
         }
       } else {
-        // "Car" / "Buggy" operation specification:
-        // Left stick Y and Right stick X are sent independently
+        // "Car" / "Buggy"
+        uint8_t rx = (joyc.GetHatType() == HAT_MINI_JOYC) ? joyc.GetX(0) : joyc.GetX(1);
         sendDataLR[0] = (joyc.GetY(0) > 155) ? 1 : (joyc.GetY(0) < 55) ? 2 : 0;
-        sendDataLR[1] = (joyc.GetX(1) > 155) ? 1 : (joyc.GetX(1) < 55) ? 2 : 0;
+        sendDataLR[1] = (rx > 155) ? 1 : (rx < 55) ? 2 : 0;
       }
       sendESPNowData();
     } else {

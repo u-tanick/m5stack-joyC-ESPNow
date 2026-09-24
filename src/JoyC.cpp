@@ -89,6 +89,11 @@ uint8_t JoyC::ReadBytes(uint8_t address, uint8_t subAddress, uint8_t count,
 }
 
 void JoyC::SetLedColor(uint32_t color) {
+    if (_current_led_color == color) {
+        return; // 色が同じならI2C書き込みをスキップしてバス負荷を激減
+    }
+    _current_led_color = color;
+
     uint8_t color_buff[3];
     color_buff[0] = (color & 0xff0000) >> 16;
     color_buff[1] = (color & 0xff00) >> 8;
@@ -186,10 +191,10 @@ uint8_t JoyC::GetPress(uint8_t pos) {
         return (press_value & ((pos == 0) ? 0x10 : 0x01)) != 0;
     } else if (_hat_type == HAT_MINI_JOYC) {
         if (pos == 0) {
-            uint8_t btn = 1;
+            uint8_t btn = 0;
             ReadBytes(MINI_JOYC_ADDR, MINI_JOYC_BUTTON_REG, 1, &btn);
-            // 内部プルアップ: 押下時=0, 離脱時=1
-            return (btn == 0) ? 1 : 0;
+            // 公式ドライバ仕様: 押下時=1, 離脱時=0
+            return (btn != 0) ? 1 : 0;
         }
         return 0;
     }
